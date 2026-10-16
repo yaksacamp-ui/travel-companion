@@ -1,0 +1,13 @@
+import crypto from 'node:crypto';
+const COOKIE='family_trip_session';
+const conf=()=>Boolean(process.env.FAMILY_PASSWORD && process.env.SESSION_SECRET && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+const sign=s=>crypto.createHmac('sha256',process.env.SESSION_SECRET).update(s).digest('hex');
+const eq=(a,b)=>{const x=Buffer.from(String(a)),y=Buffer.from(String(b));return x.length===y.length&&crypto.timingSafeEqual(x,y)};
+export const json=(value,status=200,headers={})=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});
+export const configured=()=>conf();
+export function authenticated(req){if(!conf())return false;const cookies=req.headers.get('cookie')||'';const item=cookies.split(';').map(x=>x.trim()).find(x=>x.startsWith(COOKIE+'='));if(!item)return false;const [expiration,signature]=(item.slice(COOKIE.length+1)).split('.');if(!expiration||!/^\d+$/.test(expiration)||Number(expiration)<Date.now()||!signature)return false;return eq(sign(expiration),signature)}
+export function verifyPassword(v){if(!conf()||typeof v!=='string')return false;return eq(crypto.createHash('sha256').update(v).digest('hex'),crypto.createHash('sha256').update(process.env.FAMILY_PASSWORD).digest('hex'))}
+export function sessionCookie(){const expiry=String(Date.now()+7*86400000);return `${COOKIE}=${expiry}.${sign(expiry)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800`}
+export function clearCookie(){return `${COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`}
+export async function db(path,opts={}){const base=process.env.SUPABASE_URL.replace(/\/$/,'');const r=await fetch(base+'/rest/v1/'+path,{...opts,headers:{apikey:process.env.SUPABASE_SERVICE_ROLE_KEY,Authorization:'Bearer '+process.env.SUPABASE_SERVICE_ROLE_KEY,...opts.headers}});if(!r.ok){const e=new Error('DATABASE_ERROR');e.status=r.status;throw e}return r.status===204?[]:r.json()}
+export function validTrip(payload){if(!payload||typeof payload!=='object'||Array.isArray(payload)||!Array.isArray(payload.places)||payload.places.length>300)return false;const t=payload.trip;if(!t||typeof t.name!=='string'||t.name.length>80||!/^\d{4}-\d{2}-\d{2}$/.test(t.start)||!/^\d{4}-\d{2}-\d{2}$/.test(t.end)||t.start>t.end||!Number.isInteger(t.people)||t.people<1||t.people>100)return false;return payload.places.every(p=>p&&typeof p.id==='string'&&p.id.length<120&&typeof p.name==='string'&&p.name.length<=100&&typeof p.date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(p.date)&&typeof p.memo==='string'&&p.memo.length<=1000&&(!p.location||p.location.length<=200));}
